@@ -15,6 +15,7 @@ from tempfile import mkstemp
 from paper import ArxivPaper
 from llm import set_global_llm
 import feedparser
+import time
 
 def get_zotero_corpus(id:str,key:str) -> list[dict]:
     zot = zotero.Zotero(id, 'user', key)
@@ -97,7 +98,20 @@ def add_argument(*args, **kwargs):
             env_value = kwargs.get('type')(env_value)
         parser.set_defaults(**{arg_full_name:env_value})
 
-
+def log_timestamp():
+    LOG_FILE = "log.log"
+    DAYS = 30
+    SECONDS_IN_DAY = 24 * 60 * 60
+    if not os.path.exists(LOG_FILE):
+        with open(LOG_FILE, "w", encoding="utf-8") as f:
+            f.write(str(int(time.time())) + "\n")
+        return
+    mtime = os.path.getmtime(LOG_FILE)
+    now = time.time()
+    if now - mtime > DAYS * SECONDS_IN_DAY:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(str(int(now)) + "\n")
+            
 if __name__ == '__main__':
     
     add_argument('--zotero_id', type=str, help='Zotero user ID')
@@ -183,4 +197,5 @@ if __name__ == '__main__':
     logger.info("Sending email...")
     send_email(args.sender, args.receiver, args.sender_password, args.smtp_server, args.smtp_port, html)
     logger.success("Email sent successfully! If you don't receive the email, please check the configuration and the junk box.")
+    log_timestamp()
 
