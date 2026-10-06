@@ -136,7 +136,8 @@ class ArxivRetriever(BaseRetriever):
         max_batch_retries = 5
         batch_retry_delay = 30
         for i in range(0, len(all_paper_ids), 20):
-            search = arxiv.Search(id_list=all_paper_ids[i:i + 20])
+            batch_ids = all_paper_ids[i:i + 20]
+            search = arxiv.Search(id_list=batch_ids)
             for attempt in range(max_batch_retries):
                 try:
                     batch = list(client.results(search))
@@ -148,6 +149,17 @@ class ArxivRetriever(BaseRetriever):
                         wait = batch_retry_delay * (attempt + 1)
                         logger.warning(f"arXiv API 429 on batch {i // 20}, retry {attempt + 1}/{max_batch_retries} in {wait}s")
                         sleep(wait)
+                    elif exc.status == 406 and len(batch_ids) > 1:
+                        logger.warning(f"arXiv API 406 on batch {i // 20}, retrying IDs one by one")
+                        for paper_id in batch_ids:
+                            try:
+                                single_batch = list(client.results(arxiv.Search(id_list=[paper_id])))
+                            except arxiv.HTTPError as single_exc:
+                                logger.warning(f"Skipping arXiv paper {paper_id} due to API error {single_exc.status}")
+                                continue
+                            bar.update(len(single_batch))
+                            raw_papers.extend(single_batch)
+                        break
                     else:
                         raise
             if i + 20 < len(all_paper_ids):

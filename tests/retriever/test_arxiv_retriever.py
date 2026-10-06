@@ -88,3 +88,55 @@ def test_run_with_hard_timeout_returns_none_on_failure(monkeypatch):
     )
     assert result is None
     assert "boom" in warnings[0]
+
+
+def test_arxiv_retriever_fallbacks_to_single_id_on_406(config, mock_feedparser, monkeypatch):
+    monkeypatch.setattr(arxiv_retriever, "sleep", lambda _: None)
+
+    class FakeHTTPError(Exception):
+        def __init__(self, status: int):
+            self.status = status
+
+    class FakeSearch:
+        def __init__(self, id_list):
+            self.id_list = id_list
+
+    new_entries = [
+        e for e in mock_feedparser.entries
+        if e.get("arxiv_announce_type", "new") == "new"
+    ]
+    fake_results = {
+        pid: SimpleNamespace(
+            title=entry.title,
+            authors=[SimpleNamespace(name="Test Author")],
+            summary="Test abstract",
+            pdf_url=f"https://arxiv.org/pdf/{pid}",
+            entry_id=f"https://arxiv.org/abs/{pid}",
+            source_url=lambda pid=pid: f"https://arxiv.org/e-print/{pid}",
+        )
+        for entry in new_entries
+        for pid in [entry.id.removeprefix("oai:arXiv.org:")]
+    }
+    calls: list[tuple[str, ...]] = []
+
+    class FakeClient:
+        def __init__(self, **kw):
+            pass
+
+        def results(self, search):
+            ids = tuple(search.id_list)
+            calls.append(ids)
+            if len(ids) > 1:
+                raise FakeHTTPError(406)
+            return iter([fake_results[ids[0]]])
+
+    monkeypatch.setattr(arxiv_retriever.arxiv, "HTTPError", FakeHTTPError)
+    monkeypatch.setattr(arxiv_retriever.arxiv, "Search", FakeSearch)
+    monkeypatch.setattr(arxiv_retriever.arxiv, "Client", FakeClient)
+
+    retriever = ArxivRetriever(config)
+    raw_papers = retriever._retrieve_raw_papers()
+
+    assert len(raw_papers) == len(new_entries)
+    assert len(calls[0]) > 1
+    assert all(len(call) == 1 for call in calls[1:])
